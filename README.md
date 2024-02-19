@@ -9,3 +9,7 @@
 1. Склонировать себе `git clone https://github.com/profcomff/viribus-unitis-webapp`
 2. Установить зависимости `npm install`
 3. Запустить `npm run dev`
+
+Очень маловероятно, что нужно будет редактировать файлы, кроме этого:
+
+https://github.com/profcomff/viribus-unitis-webapp/blob/main/app/src/config.ts

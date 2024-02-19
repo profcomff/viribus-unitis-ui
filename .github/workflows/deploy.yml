@@ -1,55 +1,76 @@
 name: CI
- 
+
+
 on:
-  push:
-    branches: ["main"]
+    push:
+        tags:
+            - 'v*'
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-  
- # Sets the GITHUB_TOKEN permissions to allow deployment to GitHub Pages
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-# Allow one concurrent deployment
-concurrency:
-  group: 'pages'
-  cancel-in-progress: true
+env:
+    REGISTRY: ghcr.io
+    IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Single deploy job since we're just deploying
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Set up Node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm install
-      - name: Build
-        # We need to pass the repository name directly to the Vite build command
-        # as the "base" parameter. 
-        # This is necessary because it aligns with how GitHub Pages functions. 
-        # Here's how you can achieve this:
-        run: npm run build -- -- --base /${{ github.event.repository.name }}
-      - name: Create 404.html
-        run: cp ./app/dist/index.html ./app/dist/404.html
-      - name: Setup Pages
-        uses: actions/configure-pages@v3
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v1
-        with:
-          # Upload dist repository
-          path: './app/dist'
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v1
+    build-prod-image:
+        name: Собираем production Docker
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Log in to the Container registry
+              uses: docker/login-action@v2
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Define production metadata
+              id: meta-prod
+              uses: docker/metadata-action@v4
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  tags: |
+                      type=ref,event=tag,enable=true
+                      type=raw,value=prod,enable=true
+                      type=raw,value=latest,enable=true
+
+            - name: Build and push production Docker
+              uses: docker/build-push-action@v4
+              with:
+                  file: ./deployment/Dockerfile
+                  context: .
+                  push: true
+                  build-args: |
+                      BUILD_MODE=production
+                      LAUNCH_MODE=production
+                      APP_VERSION=${{ github.ref_name }}
+                  tags: ${{ steps.meta-prod.outputs.tags }}
+                  labels: ${{ steps.meta-prod.outputs.labels }}
+
+    deploy-production:
+        name: Раскатываем production среду
+        runs-on: [self-hosted, Linux]
+        needs: [build-prod-image]
+        environment:
+            name: Production
+            url: https://vu.profcomff.com/
+        env:
+            CONTAINER_NAME: com_profcomff_vu
+        permissions:
+            packages: read
+        steps:
+            - name: Run docker container
+              run: |
+                  docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod
+                  docker stop ${{ env.CONTAINER_NAME }} || true && docker rm ${{ env.CONTAINER_NAME }} || true
+                  docker run \
+                    --detach \
+                    --restart always \
+                    --network=web \
+                    --name ${{ env.CONTAINER_NAME }} \
+                    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod
