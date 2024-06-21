@@ -54,7 +54,7 @@ jobs:
 
     deploy-production:
         name: Раскатываем production среду
-        runs-on: [self-hosted, Linux]
+        runs-on: [ self-hosted, Linux, production ]
         needs: [build-prod-image]
         environment:
             name: Production
